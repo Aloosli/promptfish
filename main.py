@@ -8,9 +8,25 @@ from ebooklib import epub
 from bs4 import BeautifulSoup
 import sys
 import warnings
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.text import Text
+from rich.align import Align
 
 # Suppress ebooklib warnings
 warnings.filterwarnings('ignore')
+
+# Initialize Rich Console
+console = Console()
+
+BANNER = """
+ [bold cyan]╔══════════════════════════════════════════════════════════════╗[/]
+ [bold cyan]║                                                              ║[/]
+ [bold cyan]║[/]                 [bold white]🎣 P R O M P T F I S H[/]                       [bold cyan]║[/]
+ [bold cyan]║[/]                                                              [bold cyan]║[/]
+ [bold cyan]╚══════════════════════════════════════════════════════════════╝[/]
+"""
 
 def connect_to_server():
     """Establishes an SSH connection to the Unraid server."""
@@ -20,7 +36,7 @@ def connect_to_server():
     key_path = os.getenv("UNRAID_KEY_PATH")
     
     if not host:
-        print("Error: UNRAID_HOST not set in .env")
+        console.print("[bold red]Error:[/] UNRAID_HOST not set in .env")
         sys.exit(1)
 
     ssh = paramiko.SSHClient()
@@ -39,12 +55,11 @@ def connect_to_server():
         ssh.connect(**connect_kwargs)
         return ssh
     except Exception as e:
-        print(f"Failed to connect to {host}: {e}")
+        console.print(f"[bold red]Failed to connect to {host}:[/] {e}")
         sys.exit(1)
 
 def get_epub_list(ssh, remote_path):
     """Finds all .epub files recursively using the 'find' command."""
-    print(f"Searching for epubs in {remote_path}...")
     # Using 'find' is much faster than walking SFTP
     stdin, stdout, stderr = ssh.exec_command(f'find "{remote_path}" -type f -name "*.epub"')
     
@@ -53,10 +68,8 @@ def get_epub_list(ssh, remote_path):
         file_list.append(line.strip())
         
     error = stderr.read().decode().strip()
-    if error:
-        # Some permission denied errors are normal, but let's log if list is empty
-        if not file_list:
-             print(f"Warning: 'find' command stderr: {error}")
+    if error and not file_list:
+             console.print(f"[yellow]Warning: 'find' command stderr: {error}[/]")
              
     return file_list
 
@@ -71,67 +84,91 @@ def extract_sentences_from_epub(epub_path):
             text = soup.get_text(separator=' ')
             
             # Basic cleaning and splitting
-            # Split by period followed by space, or newline
             start = 0
             for i in range(len(text)):
                 if text[i] in ['.', '?', '!'] and (i+1 >= len(text) or text[i+1].isspace()):
                     sentence = text[start:i+1].strip()
-                    if len(sentence) > 20 and len(sentence) < 500: # Filter out short garbage and huge blobs
+                    if len(sentence) > 30 and len(sentence) < 400: # Filter out short garbage and huge blobs
                         sentences.append(sentence)
                     start = i + 1
                     
     return sentences
 
 def main():
+    console.print(BANNER)
     load_dotenv()
     
     remote_path = os.getenv("UNRAID_BOOK_PATH")
     if not remote_path:
-        print("Error: UNRAID_BOOK_PATH not set in .env")
+        console.print("[bold red]Error:[/] UNRAID_BOOK_PATH not set in .env")
         sys.exit(1)
 
-    ssh = connect_to_server()
-    
-    try:
-        epubs = get_epub_list(ssh, remote_path)
-        if not epubs:
-            print("No epub files found.")
-            return
-
-        print(f"Found {len(epubs)} books.")
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=False
+    ) as progress:
         
-        # Pick a random book
-        chosen_book = random.choice(epubs)
-        print(f"Selected: {os.path.basename(chosen_book)}")
+        task_connect = progress.add_task("[cyan]Connecting to Unraid...[/]", total=None)
+        ssh = connect_to_server()
+        progress.update(task_connect, completed=True, visible=False)
         
-        # Download to temp file
-        sftp = ssh.open_sftp()
-        with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp:
-            print("Downloading...")
-            sftp.get(chosen_book, tmp.name)
-            tmp_path = tmp.name
-            
-        sftp.close()
-        
-        # Process
-        print("Extracting text...")
         try:
-            sentences = extract_sentences_from_epub(tmp_path)
-            if sentences:
-                print("\n" + "="*40)
-                print("YOUR WRITING PROMPT:")
-                print("="*40 + "\n")
-                print(random.choice(sentences))
-                print("\n" + "="*40)
-            else:
-                print("Could not extract any valid sentences from this book.")
-        except Exception as e:
-            print(f"Error reading epub: {e}")
-        finally:
-            os.remove(tmp_path)
+            task_search = progress.add_task(f"[cyan]Searching for epubs in {remote_path}...[/]", total=None)
+            epubs = get_epub_list(ssh, remote_path)
+            progress.update(task_search, completed=True, visible=False)
 
-    finally:
-        ssh.close()
+            if not epubs:
+                console.print("[bold red]No epub files found.[/]")
+                return
+
+            console.print(f"[green]✔ Found {len(epubs)} books.[/]")
+            
+            # Pick a random book
+            chosen_book_path = random.choice(epubs)
+            book_name = os.path.basename(chosen_book_path)
+            
+            console.print(f"  Selected: [bold yellow]{book_name}[/]")
+            
+            # Download
+            task_download = progress.add_task("[cyan]Downloading book...[/]", total=None)
+            sftp = ssh.open_sftp()
+            with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp:
+                sftp.get(chosen_book_path, tmp.name)
+                tmp_path = tmp.name
+            sftp.close()
+            progress.update(task_download, completed=True, visible=False)
+            
+            # Process
+            task_process = progress.add_task("[cyan]Extracting text...[/]", total=None)
+            try:
+                sentences = extract_sentences_from_epub(tmp_path)
+                progress.update(task_process, completed=True, visible=False)
+                
+                if sentences:
+                    prompt = random.choice(sentences)
+                    
+                    console.print("\n")
+                    console.print(Panel(
+                        Align.center(f"[bold white]{prompt}[/]"),
+                        title="[bold cyan]🎣 Your Writing Prompt[/]",
+                        border_style="cyan",
+                        padding=(1, 2),
+                        subtitle=f"[dim]from {book_name}[/]"
+                    ))
+                    console.print("\n")
+                else:
+                    console.print("[bold red]Could not extract any valid sentences from this book.[/]")
+            except Exception as e:
+                console.print(f"[bold red]Error reading epub:[/] {e}")
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+
+        finally:
+            ssh.close()
 
 if __name__ == "__main__":
     main()
+
