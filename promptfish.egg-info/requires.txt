@@ -1,0 +1,5 @@
+paramiko
+python-dotenv
+EbookLib
+beautifulsoup4
+rich

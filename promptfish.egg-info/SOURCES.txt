@@ -1,0 +1,10 @@
+README.md
+setup.py
+promptfish/__init__.py
+promptfish/main.py
+promptfish.egg-info/PKG-INFO
+promptfish.egg-info/SOURCES.txt
+promptfish.egg-info/dependency_links.txt
+promptfish.egg-info/entry_points.txt
+promptfish.egg-info/requires.txt
+promptfish.egg-info/top_level.txt

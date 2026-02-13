@@ -34,17 +34,17 @@
     cd promptfish
     ```
 
-2.  **Install dependencies**
+2.  **Install dependencies and package**
     ```bash
     python3 -m venv venv
     source venv/bin/activate  # On Windows: venv\Scripts\activate
-    pip install -r requirements.txt
+    pip install -e .
     ```
 
 3.  **Configure environment**
     Create a `.env` file in the root directory:
     ```bash
-    cp .env.example .env  # Or create new
+    cp .env.example .env
     ```
     
     Fill it with your server details:
@@ -60,10 +60,10 @@
 
 ## 🎣 Usage
 
-Just run the script and let it fish:
+Just run the command:
 
 ```bash
-python main.py
+promptfish
 ```
 
 ### Example Output

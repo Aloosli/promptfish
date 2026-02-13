@@ -1,0 +1,2 @@
+[console_scripts]
+promptfish = promptfish.main:main
