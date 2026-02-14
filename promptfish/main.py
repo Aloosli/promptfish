@@ -58,20 +58,85 @@ def connect_to_server():
         console.print(f"[bold red]Failed to connect to {host}:[/] {e}")
         sys.exit(1)
 
+FICTION_TAGS = {
+    "fiction", "science fiction", "fantasy", "horror", "romance", "mystery",
+    "mystery & detective", "crime", "thriller", "thrillers", "suspense",
+    "literary", "classics", "dystopian", "cyberpunk", "satire", "absurdist",
+    "noir", "paranormal", "magical realism", "dark fantasy", "epic",
+    "action & adventure", "historical", "contemporary", "humorous", "humor",
+    "litrpg", "litrpg (literary role-playing game)", "science fiction & fantasy",
+    "genre fiction", "juvenile fiction", "young adult fiction", "coming of age",
+    "alternative history", "apocalyptic", "hard science fiction", "urban",
+    "short stories (single author)", "collections & anthologies", "drama",
+    "poetry", "vampires", "pirates", "superheroes", "media tie-in",
+    "occult & supernatural", "time travel", "alien contact", "space exploration",
+    "multiple timelines", "love & romance",
+}
+
+
 def get_epub_list(ssh, remote_path):
-    """Finds all .epub files recursively using the 'find' command."""
-    # Using 'find' is much faster than walking SFTP
-    stdin, stdout, stderr = ssh.exec_command(f'find "{remote_path}" -type f -name "*.epub"')
-    
-    file_list = []
-    for line in stdout:
-        file_list.append(line.strip())
-        
+    """Queries Calibre's metadata.db for all epubs, with optional genre/title filtering.
+    Books tagged with any fiction genre are always kept, regardless of other tags."""
+    excluded_subjects = set()
+    raw = os.getenv("EXCLUDE_SUBJECTS", "")
+    if raw.strip():
+        excluded_subjects = {s.strip().lower() for s in raw.split(",") if s.strip()}
+
+    title_keywords = []
+    raw_kw = os.getenv("EXCLUDE_TITLE_KEYWORDS", "")
+    if raw_kw.strip():
+        title_keywords = [k.strip().lower() for k in raw_kw.split(",") if k.strip()]
+
+    db_path = os.path.join(remote_path, "metadata.db")
+    query = """
+        SELECT b.path, d.name, GROUP_CONCAT(t.name, '|')
+        FROM books b
+        JOIN data d ON b.id = d.book
+        LEFT JOIN books_tags_link btl ON b.id = btl.book
+        LEFT JOIN tags t ON btl.tag = t.id
+        WHERE d.format = 'EPUB'
+        GROUP BY b.id, d.name;
+    """
+    stdin, stdout, stderr = ssh.exec_command(f'sqlite3 "{db_path}" "{query}"')
+    raw_output = stdout.read().decode(errors="ignore")
+
     error = stderr.read().decode().strip()
-    if error and not file_list:
-             console.print(f"[yellow]Warning: 'find' command stderr: {error}[/]")
-             
-    return file_list
+    if error and not raw_output:
+        console.print(f"[yellow]Warning: sqlite3 error: {error}[/]")
+
+    all_epubs = []
+    filtered_epubs = []
+
+    for line in raw_output.strip().split("\n"):
+        if not line:
+            continue
+        parts = line.split("|")
+        book_path = parts[0]
+        file_name = parts[1]
+        tags = {p.lower() for p in parts[2:] if p}
+
+        epub_path = f"{remote_path}/{book_path}/{file_name}.epub"
+        all_epubs.append(epub_path)
+
+        # If any tag marks it as fiction, always keep it
+        if tags & FICTION_TAGS:
+            filtered_epubs.append(epub_path)
+            continue
+
+        # If it has excluded tags and no fiction tags, skip it
+        if excluded_subjects and tags & excluded_subjects:
+            continue
+
+        # Untagged books: check title keywords
+        if not tags and title_keywords:
+            title = file_name.lower()
+            if any(kw in title for kw in title_keywords):
+                continue
+
+        filtered_epubs.append(epub_path)
+
+    return all_epubs, filtered_epubs
+
 
 def extract_sentences_from_epub(epub_path):
     """Reads epub and extracts valid sentences."""
@@ -116,15 +181,22 @@ def main():
         
         try:
             task_search = progress.add_task(f"[cyan]Searching for epubs in {remote_path}...[/]", total=None)
-            epubs = get_epub_list(ssh, remote_path)
+            all_epubs, epubs = get_epub_list(ssh, remote_path)
             progress.update(task_search, completed=True, visible=False)
 
-            if not epubs:
+            if not all_epubs:
                 console.print("[bold red]No epub files found.[/]")
                 return
 
-            console.print(f"[green]✔ Found {len(epubs)} books.[/]")
-            
+            console.print(f"[green]✔ Found {len(all_epubs)} books.[/]")
+
+            if len(epubs) < len(all_epubs):
+                console.print(f"[green]✔ {len(epubs)} books after filtering.[/]")
+
+            if not epubs:
+                console.print("[bold red]No books left after filtering. Check your EXCLUDE_SUBJECTS.[/]")
+                return
+
             # Pick a random book
             chosen_book_path = random.choice(epubs)
             book_name = os.path.basename(chosen_book_path)
