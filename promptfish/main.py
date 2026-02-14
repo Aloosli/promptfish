@@ -73,19 +73,82 @@ FICTION_TAGS = {
     "multiple timelines", "love & romance",
 }
 
+DEFAULT_EXCLUDED_SUBJECTS = {
+    "cooking", "baking", "courses & dishes", "non-fiction", "nonfiction", "нонфикшн",
+    "computers", "python", "programming", "software development & engineering",
+    "web programming", "web design", "web services & apis", "javascript",
+    "object oriented", "networking", "quality assurance & testing", "salads",
+    "diet & nutrition", "vegetables", "vegan", "vegetarian", "quick & easy",
+    "herbs; spices; condiments", "soups & stews", "bread", "cakes",
+    "ice cream; ices; etc", "appetizers", "comfort food", "canning & preserving",
+    "individual chefs & restaurants", "rice & grains", "dairy",
+    "specific ingredients", "east asian style", "thai", "vietnamese",
+    "indian & south asian", "entertaining", "nutrition", "weight loss", "writing",
+    "fiction writing", "creative writing", "authorship", "editing & proofreading",
+    "language arts & disciplines", "language arts", "reference", "thesauri",
+    "methods", "style manuals", "writing skills", "composition", "book notes",
+    "biography & autobiography", "history", "history & surveys",
+    "expeditions & discoveries", "medieval", "prehistory", "prehistoric peoples",
+    "scandinavia", "russia & the former soviet union", "nordic countries",
+    "europe", "united states", "american civil war era", "ancient & classical",
+    "self-help", "self help", "personal growth", "self-management", "happiness",
+    "motivational", "success", "time management", "memory improvement",
+    "journaling", "psychology", "applied psychology",
+    "industrial & organizational psychology", "cognitive psychology & cognition",
+    "cognitive science", "psychotherapy", "psychoanalysis", "psychopathology",
+    "counseling", "post-traumatic stress disorder (ptsd)",
+    "attention-deficit disorder (add-adhd)", "attention deficit disorder (add-adhd)",
+    "anxieties & phobias", "emotions", "personality", "health & fitness",
+    "medical", "internal medicine", "women's health", "alternative therapies",
+    "healing", "body; mind & spirit", "spirituality", "mysticism", "religion",
+    "psychology of religion", "hallucinogenic drugs and religious experience",
+    "ufos & extraterrestrials", "business & economics",
+    "business & productivity software", "project management", "careers",
+    "education", "education & training", "teaching", "study aids", "study skills",
+    "study & test-taking skills", "assessment; testing & measurement",
+    "social science", "feminism & feminist theory", "women's studies",
+    "activism & social justice", "political", "sustainable development",
+    "philosophy", "existentialism", "free will & determinism", "aesthetics",
+    "metaphysics", "science", "sports & recreation", "motor sports", "drawing",
+    "cartooning", "manga", "art", "comics & graphic novels", "literary criticism",
+    "literary collections", "literary figures", "letters", "memoirs",
+    "personal memoirs", "essays", "ebook", "book", "non lu",
+    "www.it-ebooks.info", "soc035000", "isbn-13: 9780199238293", "subjects",
+    "professional", "development", "techniques", "skills", "languages", "technology", "mathematics"
+}
+
+DEFAULT_TITLE_KEYWORDS = [
+    "recipe", "cookbook", "kefir", "ferment", "nutrition", "diet", "meal prep",
+    "python", "javascript", "programming", "mastering", "handbook",
+    "learning ipython", "design patterns", "high performance", "unlocked",
+    "calibre", "quick start guide", "writer's guide", "emotion amplifiers",
+    "save the cat", "novel writing", "how to write", "anatomy of story",
+    "emotional craft of fiction", "system for writing", "home learning year",
+    "homeschool", "zettelkasten"
+]
+
 
 def get_epub_list(ssh, remote_path):
     """Queries Calibre's metadata.db for all epubs, with optional genre/title filtering.
     Books tagged with any fiction genre are always kept, regardless of other tags."""
-    excluded_subjects = set()
+    
+    # Start with global defaults
+    excluded_subjects = DEFAULT_EXCLUDED_SUBJECTS.copy()
+    
+    # Add any extra from env
     raw = os.getenv("EXCLUDE_SUBJECTS", "")
     if raw.strip():
-        excluded_subjects = {s.strip().lower() for s in raw.split(",") if s.strip()}
+        extra_subjects = {s.strip().lower() for s in raw.split(",") if s.strip()}
+        excluded_subjects.update(extra_subjects)
 
-    title_keywords = []
+    # Start with global defaults
+    title_keywords = DEFAULT_TITLE_KEYWORDS.copy()
+    
+    # Add any extra from env
     raw_kw = os.getenv("EXCLUDE_TITLE_KEYWORDS", "")
     if raw_kw.strip():
-        title_keywords = [k.strip().lower() for k in raw_kw.split(",") if k.strip()]
+        extra_keywords = [k.strip().lower() for k in raw_kw.split(",") if k.strip()]
+        title_keywords.extend(extra_keywords)
 
     db_path = os.path.join(remote_path, "metadata.db")
     query = """
